@@ -38,44 +38,32 @@ async fn ready_handler() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
+const RESP_APPROVED: &[u8] = b"{\"approved\":true,\"fraud_score\":0.0}";
+const RESP_REJECTED: &[u8] = b"{\"approved\":false,\"fraud_score\":1.0}";
+
 async fn fraud_score_handler(
     req: web::Json<FraudRequest>,
-    data: web::Data<Arc<AppState>>,
+    data: web::Data<AppState>,
 ) -> impl Responder {
     let vector = vectorize(&req, &data.norm_config, &data.mcc_risk_map);
 
-    let fraud_score = match data.predictor.predict(vector).await {
+    let fraud_score = match data.predictor.predict(vector) {
         Some(score) => score,
         None => {
-            return HttpResponse::Ok().json(FraudResponse {
-                approved: true,
-                fraud_score: 0.0,
-            })
+            return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
         }
     };
 
-    if fraud_score < 0.4 {
-        HttpResponse::Ok().json(FraudResponse {
-            approved: true,
-            fraud_score: 0.0,
-        })
-    } else if fraud_score > 0.7 {
-        HttpResponse::Ok().json(FraudResponse {
-            approved: false,
-            fraud_score: 1.0,
-        })
+    if fraud_score <= 0.4 {
+        HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
+    } else if fraud_score > 0.65 {
+        HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
     } else {
         let knn_score = data.ivf_index.search(&vector);
         if knn_score < 0.6 {
-            HttpResponse::Ok().json(FraudResponse {
-                approved: true,
-                fraud_score: 0.0,
-            })
+            HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
         } else {
-            HttpResponse::Ok().json(FraudResponse {
-                approved: false,
-                fraud_score: 1.0,
-            })
+            HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
         }
     }
 }
@@ -87,10 +75,7 @@ fn json_error_handler(
 ) -> actix_web::Error {
     actix_web::error::InternalError::from_response(
         err,
-        HttpResponse::Ok().json(FraudResponse {
-            approved: true,
-            fraud_score: 0.0,
-        }),
+        HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED),
     )
     .into()
 }
@@ -128,7 +113,7 @@ async fn main() -> std::io::Result<()> {
 
     let _ = std::fs::remove_file(&sock_path);
 
-    let state = Arc::new(AppState {
+    let state = web::Data::new(AppState {
         predictor,
         ivf_index,
         norm_config,
@@ -141,7 +126,7 @@ async fn main() -> std::io::Result<()> {
             .error_handler(json_error_handler);
 
         App::new()
-            .app_data(web::Data::new(state.clone()))
+            .app_data(state.clone())
             .app_data(json_config)
             .route("/ready", web::get().to(ready_handler))
             .route("/fraud-score", web::post().to(fraud_score_handler))

@@ -1,8 +1,5 @@
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::ffi::CString;
-use std::sync::mpsc;
-use tokio::sync::oneshot;
-
 pub type DMatrixHandle = *mut c_void;
 pub type BoosterHandle = *mut c_void;
 pub type bst_ulong = u64;
@@ -46,12 +43,12 @@ extern "C" {
     ) -> c_int;
 }
 
-struct SyncBooster(BoosterHandle);
-unsafe impl Send for SyncBooster {}
-
 pub struct Predictor {
-    tx: mpsc::SyncSender<( [f32; 14], oneshot::Sender<f64> )>,
+    handle: BoosterHandle,
 }
+
+unsafe impl Send for Predictor {}
+unsafe impl Sync for Predictor {}
 
 impl Predictor {
     pub fn new(model_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -70,45 +67,41 @@ impl Predictor {
             let p_val = CString::new("1")?;
             XGBoosterSetParam(handle, p_key.as_ptr(), p_val.as_ptr());
 
-            let handle_ptr = handle as usize;
-            let (tx, rx) = mpsc::sync_channel::<( [f32; 14], oneshot::Sender<f64> )>(1024);
-
-            std::thread::spawn(move || {
-                let handle = handle_ptr as BoosterHandle;
-                for (features, resp) in rx {
-                    let mut dmatrix: DMatrixHandle = std::ptr::null_mut();
-                    let mut out_score = 0.0;
-
-                    if XGDMatrixCreateFromMat(features.as_ptr(), 1, 14, 0.0, &mut dmatrix) == 0 {
-                        let mut out_len: bst_ulong = 0;
-                        let mut out_ptr: *const f32 = std::ptr::null();
-                        
-                        if XGBoosterPredict(handle, dmatrix, 0, 0, 0, &mut out_len, &mut out_ptr) == 0 {
-                            if out_len > 0 && !out_ptr.is_null() {
-                                out_score = *out_ptr as f64;
-                                if out_score < 0.0 { out_score = 0.0; }
-                                if out_score > 1.0 { out_score = 1.0; }
-                            }
-                        }
-                        XGDMatrixFree(dmatrix);
-                    }
-                    
-                    let _ = resp.send(out_score);
-                }
-                XGBoosterFree(handle);
-            });
-
-            Ok(Self { tx })
+            Ok(Self { handle })
         }
     }
 
-    pub async fn predict(&self, features: [f32; 14]) -> Option<f64> {
-        let (resp_tx, resp_rx) = oneshot::channel();
-        if self.tx.try_send((features, resp_tx)).is_ok() {
-            if let Ok(Ok(score)) = tokio::time::timeout(std::time::Duration::from_millis(50), resp_rx).await {
-                return Some(score);
+    pub fn predict(&self, features: [f32; 14]) -> Option<f64> {
+        unsafe {
+            let mut dmatrix: DMatrixHandle = std::ptr::null_mut();
+            let mut out_score = 0.0;
+
+            if XGDMatrixCreateFromMat(features.as_ptr(), 1, 14, 0.0, &mut dmatrix) == 0 {
+                let mut out_len: bst_ulong = 0;
+                let mut out_ptr: *const f32 = std::ptr::null();
+                
+                if XGBoosterPredict(self.handle, dmatrix, 0, 0, 0, &mut out_len, &mut out_ptr) == 0 {
+                    if out_len > 0 && !out_ptr.is_null() {
+                        out_score = *out_ptr as f64;
+                        if out_score < 0.0 { out_score = 0.0; }
+                        if out_score > 1.0 { out_score = 1.0; }
+                        XGDMatrixFree(dmatrix);
+                        return Some(out_score);
+                    }
+                }
+                XGDMatrixFree(dmatrix);
+            }
+            None
+        }
+    }
+}
+
+impl Drop for Predictor {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.handle.is_null() {
+                XGBoosterFree(self.handle);
             }
         }
-        None
     }
 }

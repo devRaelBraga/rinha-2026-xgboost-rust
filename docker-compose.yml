@@ -28,7 +28,8 @@ services:
           memory: "30MB"
 
   api1:
-    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    #image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    build: .
     environment:
       - PORT=8080
       - INSTANCE_ID=1
@@ -49,7 +50,8 @@ services:
           memory: "160MB"
 
   api2:
-    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    #image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    build: .
     environment:
       - PORT=8080
       - INSTANCE_ID=2
