@@ -1,0 +1,70 @@
+volumes:
+  sockets:
+
+networks:
+  rinha:
+    driver: bridge
+
+services:
+  haproxy:
+    image: haproxy:3.3
+    container_name: rinha-haproxy
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - sockets:/sockets
+    depends_on:
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+    networks:
+      - rinha
+    deploy:
+      resources:
+        limits:
+          cpus: "0.20"
+          memory: "30MB"
+
+  api1:
+    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    environment:
+      - PORT=8080
+      - INSTANCE_ID=1
+    volumes:
+      - sockets:/tmp/sockets
+    networks:
+      - rinha
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "160MB"
+
+  api2:
+    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    environment:
+      - PORT=8080
+      - INSTANCE_ID=2
+    volumes:
+      - sockets:/tmp/sockets
+    networks:
+      - rinha
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "160MB"

@@ -1,0 +1,16 @@
+{
+    "participants": [
+        "Hisrael Braga"
+    ],
+    "social": [
+        "https://github.com/devRaelBraga",
+        "https://linkedin.com/in/hisrael-braga-052188216"
+    ],
+    "source-code-repo": "https://github.com/devRaelBraga/rinha-2026-xgboost-rust",
+    "stack": [
+        "rust",
+        "xgboost",
+        "python"
+    ],
+    "open_to_work": false
+}
