@@ -1,26 +1,32 @@
 volumes:
   sockets:
-
-networks:
-  rinha:
-    driver: bridge
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
 
 services:
-  haproxy:
-    image: haproxy:3.3
-    container_name: rinha-haproxy
+
+  lb:
+    image: hisraelbraga/hisrael-lb-rust:v1
+    container_name: rinha-lb
     ports:
       - "9999:9999"
     volumes:
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - sockets:/sockets
     depends_on:
       api1:
         condition: service_healthy
       api2:
         condition: service_healthy
-    networks:
-      - rinha
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    logging:
+      driver: "none"
     deploy:
       resources:
         limits:
@@ -28,20 +34,25 @@ services:
           memory: "30MB"
 
   api1:
-    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    image: hisraelbraga/hisrael-rinha-rust-2026:v3.1
     environment:
       - PORT=8080
       - INSTANCE_ID=1
     volumes:
       - sockets:/tmp/sockets
-    networks:
-      - rinha
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    logging:
+      driver: "none"
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
-      interval: 2s
-      timeout: 1s
+      timeout: 5s
       retries: 5
-      start_period: 5s
     deploy:
       resources:
         limits:
@@ -49,20 +60,25 @@ services:
           memory: "160MB"
 
   api2:
-    image: hisraelbraga/hisrael-rinha-rust-2026:initial
+    image: hisraelbraga/hisrael-rinha-rust-2026:v3.1
     environment:
       - PORT=8080
       - INSTANCE_ID=2
     volumes:
       - sockets:/tmp/sockets
-    networks:
-      - rinha
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    logging:
+      driver: "none"
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
-      interval: 2s
-      timeout: 1s
+      timeout: 5s
       retries: 5
-      start_period: 5s
     deploy:
       resources:
         limits:
