@@ -106,11 +106,20 @@ async fn main() -> std::io::Result<()> {
     let ivf_index = IvfIndex::load(centroids_path, offsets_path, vectors_path, labels_path)
         .expect("Failed to load IVF index");
 
-    println!("Model loaded, API is ready!");
+    // --- Warmup Sequence ---
+    // XGBoost lazily allocates inference buffers on first predict; prime them now.
+    // Also warms CPU cache lines for the IVF centroid/vector data.
+    println!("Running warmup sequence...");
+    let dummy_vector: [f32; 14] = [0.0f32; 14];
+    let _ = predictor.predict(dummy_vector);
+    let _ = ivf_index.search(&dummy_vector);
+    println!("Warmup complete, API is ready!");
 
+    // --- Late-bind Unix Socket ---
+    // Socket is created only after warmup so HAProxy won't route traffic
+    // to an instance that is still priming its caches.
     let instance_id = std::env::var("INSTANCE_ID").unwrap_or_else(|_| "1".to_string());
     let sock_path = format!("/tmp/sockets/api{}.sock", instance_id);
-
     let _ = std::fs::remove_file(&sock_path);
 
     let state = web::Data::new(AppState {
