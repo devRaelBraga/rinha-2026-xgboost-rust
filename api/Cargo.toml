@@ -8,8 +8,9 @@ actix-web = "4"
 mimalloc = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-chrono = "0.4"
-tokio = { version = "1", features = ["sync", "time"] }
+simd-json = { version = "0.14", features = ["serde_impl"] }
+cookie = ">=0.16.3"
+time = ">=0.3.36"
 
 [profile.release]
 lto = "fat"

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct FraudRequest {
@@ -42,12 +42,6 @@ pub struct Terminal {
 pub struct LastTransaction {
     pub timestamp: String,
     pub km_from_current: f64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FraudResponse {
-    pub approved: bool,
-    pub fraud_score: f64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

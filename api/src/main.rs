@@ -9,13 +9,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Arc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
 use knn::IvfIndex;
-use models::{FraudRequest, FraudResponse, Normalization};
+use models::{FraudRequest, Normalization};
 use predictor::Predictor;
 use vectorizer::vectorize;
 
@@ -23,7 +22,7 @@ struct AppState {
     predictor: Predictor,
     ivf_index: IvfIndex,
     norm_config: Normalization,
-    mcc_risk_map: HashMap<String, f64>,
+    mcc_risk: Box<[f32; 10000]>,
 }
 
 fn load_json<T: serde::de::DeserializeOwned>(path: &str) -> std::io::Result<T> {
@@ -42,10 +41,19 @@ const RESP_APPROVED: &[u8] = b"{\"approved\":true,\"fraud_score\":0.0}";
 const RESP_REJECTED: &[u8] = b"{\"approved\":false,\"fraud_score\":1.0}";
 
 async fn fraud_score_handler(
-    req: web::Json<FraudRequest>,
+    body: web::Bytes,
     data: web::Data<AppState>,
 ) -> impl Responder {
-    let vector = vectorize(&req, &data.norm_config, &data.mcc_risk_map);
+    // Deserialize with simd-json (needs mutable input)
+    let mut bytes = body.to_vec();
+    let req: FraudRequest = match simd_json::from_slice(&mut bytes) {
+        Ok(r) => r,
+        Err(_) => {
+            return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
+        }
+    };
+
+    let vector = vectorize(&req, &data.norm_config, &data.mcc_risk);
 
     let fraud_score = match data.predictor.predict(vector) {
         Some(score) => score,
@@ -97,7 +105,17 @@ async fn main() -> std::io::Result<()> {
     let norm_config: Normalization = load_json(norm_path).expect("Failed to load normalization.json");
 
     println!("Loading MCC risk map...");
-    let mcc_risk_map: HashMap<String, f64> = load_json(mcc_path).expect("Failed to load mcc_risk.json");
+    let raw_mcc: HashMap<String, f64> = load_json(mcc_path).expect("Failed to load mcc_risk.json");
+
+    // Build flat MCC lookup array (40KB, fits in L1 cache) — replaces HashMap
+    let mut mcc_risk = Box::new([0.5f32; 10000]);
+    for (code, risk) in &raw_mcc {
+        if let Ok(idx) = code.parse::<usize>() {
+            if idx < 10000 {
+                mcc_risk[idx] = *risk as f32;
+            }
+        }
+    }
 
     println!("Loading XGBoost model...");
     let predictor = Predictor::new(&model_path).expect("Failed to load XGBoost model");
@@ -126,7 +144,7 @@ async fn main() -> std::io::Result<()> {
         predictor,
         ivf_index,
         norm_config,
-        mcc_risk_map,
+        mcc_risk,
     });
 
     let server = HttpServer::new(move || {
@@ -141,6 +159,9 @@ async fn main() -> std::io::Result<()> {
             .route("/fraud-score", web::post().to(fraud_score_handler))
     })
     .workers(1)
+    .backlog(128)
+    .keep_alive(std::time::Duration::from_secs(5))
+    .max_connections(512)
     .bind_uds(&sock_path)?;
 
     // Set permissions to 0777
