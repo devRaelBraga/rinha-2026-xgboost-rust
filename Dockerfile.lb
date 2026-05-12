@@ -1,0 +1,38 @@
+# ==========================================
+# ESTÁGIO 1: BUILDER
+# ==========================================
+FROM rust:1-bookworm AS builder
+
+# Install clang and kernel headers required for io_uring/monoio
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang liburing-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/lb
+
+# Cache dependencies
+COPY lb/Cargo.toml lb/Cargo.lock* ./
+RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -rf src
+
+ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
+
+# Build real code
+COPY lb/src/ ./src/
+RUN touch src/main.rs && cargo build --release
+RUN strip target/release/lb
+
+# ==========================================
+# ESTÁGIO 2: RUNTIME
+# ==========================================
+FROM debian:bookworm-slim
+
+# Install liburing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    liburing2 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/lb/target/release/lb /lb
+
+EXPOSE 9999
+
+CMD ["/lb"]

@@ -6,13 +6,14 @@ networks:
     driver: bridge
 
 services:
-  haproxy:
-    image: haproxy:3.3
-    container_name: rinha-haproxy
+  lb:
+    build:
+      context: .
+      dockerfile: Dockerfile.lb
+    container_name: rinha-lb
     ports:
       - "9999:9999"
     volumes:
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - sockets:/sockets
     depends_on:
       api1:

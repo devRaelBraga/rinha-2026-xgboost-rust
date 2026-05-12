@@ -44,7 +44,10 @@ async fn fraud_score_handler(
     body: web::Bytes,
     data: web::Data<AppState>,
 ) -> impl Responder {
-    // Deserialize with simd-json (needs mutable input)
+    let start_total = std::time::Instant::now();
+
+    // Deserialize
+    let t0 = std::time::Instant::now();
     let mut bytes = body.to_vec();
     let req: FraudRequest = match simd_json::from_slice(&mut bytes) {
         Ok(r) => r,
@@ -52,28 +55,52 @@ async fn fraud_score_handler(
             return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
         }
     };
+    let t_json = t0.elapsed();
 
+    // Vectorize
+    let t1 = std::time::Instant::now();
     let vector = vectorize(&req, &data.norm_config, &data.mcc_risk);
+    let t_vec = t1.elapsed();
 
+    // Predict
+    let t2 = std::time::Instant::now();
     let fraud_score = match data.predictor.predict(vector) {
         Some(score) => score,
         None => {
             return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
         }
     };
+    let t_xgb = t2.elapsed();
 
-    if fraud_score <= 0.4 {
+    let mut t_knn = std::time::Duration::from_secs(0);
+    let response = if fraud_score <= 0.4 {
         HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
     } else if fraud_score > 0.65 {
         HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
     } else {
+        let t3 = std::time::Instant::now();
         let knn_score = data.ivf_index.search(&vector);
+        t_knn = t3.elapsed();
         if knn_score < 0.6 {
             HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
         } else {
             HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
         }
+    };
+
+    let total = start_total.elapsed();
+    if total.as_micros() > 700 {
+        eprintln!("[SLOW API] Total: {:.2}ms | JSON: {:.2}ms | Vec: {:.2}ms | XGB: {:.2}ms | KNN: {:.2}ms | Score: {:.3}", 
+            total.as_secs_f64() * 1000.0,
+            t_json.as_secs_f64() * 1000.0,
+            t_vec.as_secs_f64() * 1000.0,
+            t_xgb.as_secs_f64() * 1000.0,
+            t_knn.as_secs_f64() * 1000.0,
+            fraud_score
+        );
     }
+
+    response
 }
 
 // Fallback for malformed JSON to return approved instead of 400

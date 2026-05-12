@@ -1,0 +1,15 @@
+[package]
+name = "lb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+monoio = { version = "0.2.4", features = ["sync", "macros", "utils"] }
+mimalloc = "0.1.39"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+strip = true

@@ -57,10 +57,14 @@ export default function () {
     const expectedApproved = entry.expected_approved;
 
     const res = http.post(
-        'http://rinha-haproxy:9999/fraud-score',
+        'http://rinha-lb:9999/fraud-score',
         JSON.stringify(entry.request),
         { headers: { 'Content-Type': 'application/json' }, timeout: '2001ms' }
     );
+
+    if (res.timings.duration > 5) {
+        console.log(`[SLOW REQ] Duration: ${res.timings.duration}ms (send: ${res.timings.sending}ms, wait: ${res.timings.waiting}ms, recv: ${res.timings.receiving}ms). TX_ID: ${entry.request.id}`);
+    }
 
     if (res.status === 200) {
         const body = JSON.parse(res.body);

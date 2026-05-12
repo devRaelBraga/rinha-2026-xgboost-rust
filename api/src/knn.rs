@@ -104,7 +104,7 @@ impl IvfIndex {
             };
         }
 
-        let mut top_dist = [u64::MAX; 5];
+        let mut top_dist = [u32::MAX; 5];
         let mut top_idx = [0usize; 5];
 
         for &cell_id in &top_cells {
@@ -114,10 +114,10 @@ impl IvfIndex {
             for i in start..end {
                 let target_vec = &self.vectors[i];
                 
-                let mut dist: u64 = 0;
+                let mut dist: u32 = 0;
                 for j in 0..16 {
                     let diff = target_vec[j] as i32 - q[j] as i32;
-                    dist += (diff * diff) as u64;
+                    dist += (diff * diff) as u32;
                 }
 
                 if dist < top_dist[4] {
@@ -136,7 +136,7 @@ impl IvfIndex {
         let mut fraud_count = 0;
         for i in 0..5 {
             let idx_val = top_idx[i];
-            if idx_val == 0 && top_dist[i] == u64::MAX {
+            if idx_val == 0 && top_dist[i] == u32::MAX {
                 continue;
             }
             let byte_idx = idx_val / 8;
