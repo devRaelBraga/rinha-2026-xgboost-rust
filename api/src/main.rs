@@ -77,22 +77,11 @@ fn process_fraud_request(body: &mut [u8]) -> &'static [u8] {
     with_state(|state| {
         let vector = vectorize(&req, &state.norm_config, &state.mcc_risk);
 
-        let fraud_score = match state.predictor.predict(vector) {
-            Some(score) => score,
-            None => return RESP_APPROVED,
-        };
-
-        if fraud_score <= 0.4 {
+        let knn_score = state.ivf_index.search(&vector);
+        if knn_score < 0.6 {
             RESP_APPROVED
-        } else if fraud_score > 0.65 {
-            RESP_REJECTED
         } else {
-            let knn_score = state.ivf_index.search(&vector);
-            if knn_score < 0.6 {
-                RESP_APPROVED
-            } else {
-                RESP_REJECTED
-            }
+            RESP_REJECTED
         }
     })
 }
