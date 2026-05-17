@@ -3,8 +3,9 @@ mod models;
 mod predictor;
 mod vectorizer;
 
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use mimalloc::MiMalloc;
+use monoio::io::{AsyncReadRent, AsyncReadRentExt, AsyncWriteRentExt};
+use monoio::net::UnixStream;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -18,6 +19,10 @@ use models::{FraudRequest, Normalization};
 use predictor::Predictor;
 use vectorizer::vectorize;
 
+// ---------------------------------------------------------------------------
+// Application state — stored in thread-local, no Arc, no atomics.
+// Safe because monoio is single-threaded (threads = 1).
+// ---------------------------------------------------------------------------
 struct AppState {
     predictor: Predictor,
     ivf_index: IvfIndex,
@@ -25,6 +30,32 @@ struct AppState {
     mcc_risk: Box<[f32; 10000]>,
 }
 
+thread_local! {
+    static STATE: std::cell::UnsafeCell<Option<AppState>> = std::cell::UnsafeCell::new(None);
+}
+
+#[inline(always)]
+fn with_state<F, R>(f: F) -> R
+where
+    F: FnOnce(&AppState) -> R,
+{
+    STATE.with(|cell| unsafe {
+        let state = &*cell.get();
+        f(state.as_ref().unwrap())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Pre-baked HTTP responses — zero allocation on the response path.
+// ---------------------------------------------------------------------------
+const RESP_APPROVED: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 35\r\nConnection: keep-alive\r\n\r\n{\"approved\":true,\"fraud_score\":0.0}";
+const RESP_REJECTED: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\nConnection: keep-alive\r\n\r\n{\"approved\":false,\"fraud_score\":1.0}";
+const RESP_READY: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nOK";
+const RESP_404: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+// ---------------------------------------------------------------------------
+// JSON helpers
+// ---------------------------------------------------------------------------
 fn load_json<T: serde::de::DeserializeOwned>(path: &str) -> std::io::Result<T> {
     let mut file = File::open(path)?;
     let mut contents = String::new();
@@ -33,89 +64,162 @@ fn load_json<T: serde::de::DeserializeOwned>(path: &str) -> std::io::Result<T> {
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-async fn ready_handler() -> impl Responder {
-    HttpResponse::Ok().body("OK")
-}
-
-const RESP_APPROVED: &[u8] = b"{\"approved\":true,\"fraud_score\":0.0}";
-const RESP_REJECTED: &[u8] = b"{\"approved\":false,\"fraud_score\":1.0}";
-
-async fn fraud_score_handler(
-    body: web::Bytes,
-    data: web::Data<AppState>,
-) -> impl Responder {
-    let start_total = std::time::Instant::now();
-
-    // Deserialize
-    let t0 = std::time::Instant::now();
-    let mut bytes = body.to_vec();
-    let req: FraudRequest = match simd_json::from_slice(&mut bytes) {
+// ---------------------------------------------------------------------------
+// HTTP request handler — the hot path
+// ---------------------------------------------------------------------------
+#[inline(always)]
+fn process_fraud_request(body: &mut [u8]) -> &'static [u8] {
+    let req: FraudRequest = match simd_json::from_slice(body) {
         Ok(r) => r,
-        Err(_) => {
-            return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
-        }
+        Err(_) => return RESP_APPROVED,
     };
-    let t_json = t0.elapsed();
 
-    // Vectorize
-    let t1 = std::time::Instant::now();
-    let vector = vectorize(&req, &data.norm_config, &data.mcc_risk);
-    let t_vec = t1.elapsed();
+    with_state(|state| {
+        let vector = vectorize(&req, &state.norm_config, &state.mcc_risk);
 
-    // Predict
-    let t2 = std::time::Instant::now();
-    let fraud_score = match data.predictor.predict(vector) {
-        Some(score) => score,
-        None => {
-            return HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED);
-        }
-    };
-    let t_xgb = t2.elapsed();
+        let fraud_score = match state.predictor.predict(vector) {
+            Some(score) => score,
+            None => return RESP_APPROVED,
+        };
 
-    let mut t_knn = std::time::Duration::from_secs(0);
-    let response = if fraud_score <= 0.4 {
-        HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
-    } else if fraud_score > 0.65 {
-        HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
-    } else {
-        let t3 = std::time::Instant::now();
-        let knn_score = data.ivf_index.search(&vector);
-        t_knn = t3.elapsed();
-        if knn_score < 0.6 {
-            HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED)
+        if fraud_score <= 0.4 {
+            RESP_APPROVED
+        } else if fraud_score > 0.65 {
+            RESP_REJECTED
         } else {
-            HttpResponse::Ok().content_type("application/json").body(RESP_REJECTED)
+            let knn_score = state.ivf_index.search(&vector);
+            if knn_score < 0.6 {
+                RESP_APPROVED
+            } else {
+                RESP_REJECTED
+            }
         }
-    };
+    })
+}
 
-    let total = start_total.elapsed();
-    if total.as_micros() > 700 {
-        eprintln!("[SLOW API] Total: {:.2}ms | JSON: {:.2}ms | Vec: {:.2}ms | XGB: {:.2}ms | KNN: {:.2}ms | Score: {:.3}", 
-            total.as_secs_f64() * 1000.0,
-            t_json.as_secs_f64() * 1000.0,
-            t_vec.as_secs_f64() * 1000.0,
-            t_xgb.as_secs_f64() * 1000.0,
-            t_knn.as_secs_f64() * 1000.0,
-            fraud_score
-        );
+// ---------------------------------------------------------------------------
+// Connection handler — keep-alive loop over a single Unix socket stream.
+//
+// Protocol assumptions (we control the LB):
+//   - HTTP/1.1 only
+//   - Requests always have Content-Length (no chunked)
+//   - Headers + request line fit within 2048 bytes
+// ---------------------------------------------------------------------------
+async fn handle_connection(stream: UnixStream) {
+    // 2KB header buffer — typical request headers are ~200-400 bytes.
+    // We own this buffer and pass it to monoio's read() which takes ownership.
+    let mut hdr_buf = vec![0u8; 2048];
+    // Body buffer — reused across keep-alive requests.
+    let mut body_buf: Vec<u8> = Vec::with_capacity(1024);
+
+    let mut stream = stream;
+
+    loop {
+        // ---- Read headers ------------------------------------------------
+        let (res, buf) = stream.read(hdr_buf).await;
+        hdr_buf = buf;
+        let n = match res {
+            Ok(0) | Err(_) => return, // connection closed or error
+            Ok(n) => n,
+        };
+
+        // ---- Parse HTTP request ------------------------------------------
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let parse_result = match req.parse(&hdr_buf[..n]) {
+            Ok(s) => s,
+            Err(_) => {
+                // Malformed request → respond approved (same as Actix error handler)
+                let (res, _) = stream.write_all(RESP_APPROVED.to_vec()).await;
+                if res.is_err() { return; }
+                continue;
+            }
+        };
+
+        let header_len = match parse_result {
+            httparse::Status::Complete(len) => len,
+            httparse::Status::Partial => {
+                // Headers incomplete in 2KB — shouldn't happen for our payloads
+                let (res, _) = stream.write_all(RESP_404.to_vec()).await;
+                if res.is_err() { return; }
+                continue;
+            }
+        };
+
+        let method = req.method.unwrap_or("");
+        let path = req.path.unwrap_or("");
+
+        // ---- Route dispatch ----------------------------------------------
+        if method == "GET" && path == "/ready" {
+            let (res, _) = stream.write_all(RESP_READY.to_vec()).await;
+            if res.is_err() { return; }
+            // Drain any leftover bytes (shouldn't be any for GET)
+            continue;
+        }
+
+        if method != "POST" || path != "/fraud-score" {
+            let (res, _) = stream.write_all(RESP_404.to_vec()).await;
+            if res.is_err() { return; }
+            continue;
+        }
+
+        // ---- Extract Content-Length --------------------------------------
+        let mut content_length: usize = 0;
+        for h in req.headers.iter() {
+            if h.name.eq_ignore_ascii_case("content-length") {
+                // Fast atoi — content-length is always a small number
+                for &b in h.value {
+                    content_length = content_length * 10 + (b - b'0') as usize;
+                }
+                break;
+            }
+        }
+
+        if content_length == 0 {
+            // No body → respond approved
+            let (res, _) = stream.write_all(RESP_APPROVED.to_vec()).await;
+            if res.is_err() { return; }
+            continue;
+        }
+
+        // ---- Assemble the body -------------------------------------------
+        // Some (or all) of the body may already be in hdr_buf after the headers.
+        let body_already_read = n - header_len;
+        body_buf.clear();
+
+        if body_already_read >= content_length {
+            // Full body already in hdr_buf
+            body_buf.extend_from_slice(&hdr_buf[header_len..header_len + content_length]);
+        } else {
+            // Partial body — copy what we have, then read the rest
+            body_buf.extend_from_slice(&hdr_buf[header_len..n]);
+            let remaining = content_length - body_already_read;
+            let old_len = body_buf.len();
+            body_buf.resize(old_len + remaining, 0);
+
+            // Take the tail slice out as a Vec for monoio's ownership model
+            let tail = body_buf.split_off(old_len);
+            let (res, tail_buf) = stream.read_exact(tail).await;
+            match res {
+                Ok(_) => {
+                    body_buf.extend_from_slice(&tail_buf);
+                }
+                Err(_) => return,
+            }
+        }
+
+        // ---- Process and respond -----------------------------------------
+        let response = process_fraud_request(&mut body_buf);
+        let (res, _) = stream.write_all(response.to_vec()).await;
+        if res.is_err() { return; }
     }
-
-    response
 }
 
-// Fallback for malformed JSON to return approved instead of 400
-fn json_error_handler(
-    err: actix_web::error::JsonPayloadError,
-    _req: &actix_web::HttpRequest,
-) -> actix_web::Error {
-    actix_web::error::InternalError::from_response(
-        err,
-        HttpResponse::Ok().content_type("application/json").body(RESP_APPROVED),
-    )
-    .into()
-}
-
-#[actix_web::main]
+// ---------------------------------------------------------------------------
+// Main — load models, create Unix socket, accept loop.
+// ---------------------------------------------------------------------------
+#[monoio::main(threads = 1)]
 async fn main() -> std::io::Result<()> {
     let model_path = std::env::args()
         .nth(2)
@@ -160,36 +264,34 @@ async fn main() -> std::io::Result<()> {
     let _ = ivf_index.search(&dummy_vector);
     println!("Warmup complete, API is ready!");
 
+    // Store state in thread-local (no Arc needed — single threaded monoio)
+    STATE.with(|cell| unsafe {
+        *cell.get() = Some(AppState {
+            predictor,
+            ivf_index,
+            norm_config,
+            mcc_risk,
+        });
+    });
+
     // --- Late-bind Unix Socket ---
-    // Socket is created only after warmup so HAProxy won't route traffic
+    // Socket is created only after warmup so the LB won't route traffic
     // to an instance that is still priming its caches.
     let instance_id = std::env::var("INSTANCE_ID").unwrap_or_else(|_| "1".to_string());
     let sock_path = format!("/tmp/sockets/api{}.sock", instance_id);
     let _ = std::fs::remove_file(&sock_path);
 
-    let state = web::Data::new(AppState {
-        predictor,
-        ivf_index,
-        norm_config,
-        mcc_risk,
-    });
+    // Default: monoio native bind (io_uring IORING_OP_SOCKET — fastest).
+    // With --features compat: std bind + from_std (for Docker Desktop / older kernels).
+    #[cfg(not(feature = "compat"))]
+    let listener = monoio::net::UnixListener::bind(&sock_path)?;
 
-    let server = HttpServer::new(move || {
-        let json_config = web::JsonConfig::default()
-            .limit(4096)
-            .error_handler(json_error_handler);
-
-        App::new()
-            .app_data(state.clone())
-            .app_data(json_config)
-            .route("/ready", web::get().to(ready_handler))
-            .route("/fraud-score", web::post().to(fraud_score_handler))
-    })
-    .workers(1)
-    .backlog(128)
-    .keep_alive(std::time::Duration::from_secs(5))
-    .max_connections(512)
-    .bind_uds(&sock_path)?;
+    #[cfg(feature = "compat")]
+    let listener = {
+        let std_listener = std::os::unix::net::UnixListener::bind(&sock_path)?;
+        std_listener.set_nonblocking(true)?;
+        monoio::net::UnixListener::from_std(std_listener)?
+    };
 
     // Set permissions to 0777
     let mut perms = std::fs::metadata(&sock_path)?.permissions();
@@ -198,5 +300,11 @@ async fn main() -> std::io::Result<()> {
 
     println!("Listening on Unix Socket: {}", sock_path);
 
-    server.run().await
+    loop {
+        let (stream, _) = match listener.accept().await {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        monoio::spawn(handle_connection(stream));
+    }
 }

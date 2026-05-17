@@ -1,5 +1,8 @@
 volumes:
   sockets:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
 
 networks:
   rinha:
@@ -30,7 +33,10 @@ services:
 
   api1:
     #image: hisraelbraga/hisrael-rinha-rust-2026:initial
-    build: .
+    build:
+      context: .
+      args:
+        FEATURES: ${FEATURES:-}
     environment:
       - PORT=8080
       - INSTANCE_ID=1
@@ -40,10 +46,8 @@ services:
       - rinha
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
-      interval: 2s
       timeout: 1s
       retries: 5
-      start_period: 5s
     deploy:
       resources:
         limits:
@@ -52,7 +56,10 @@ services:
 
   api2:
     #image: hisraelbraga/hisrael-rinha-rust-2026:initial
-    build: .
+    build:
+      context: .
+      args:
+        FEATURES: ${FEATURES:-}
     environment:
       - PORT=8080
       - INSTANCE_ID=2
@@ -62,10 +69,8 @@ services:
       - rinha
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
-      interval: 2s
       timeout: 1s
       retries: 5
-      start_period: 5s
     deploy:
       resources:
         limits:

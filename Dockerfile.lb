@@ -14,7 +14,7 @@ WORKDIR /app/lb
 COPY lb/Cargo.toml lb/Cargo.lock* ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -rf src
 
-ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
+# ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
 
 # Build real code
 COPY lb/src/ ./src/
