@@ -23,17 +23,13 @@ RUN mkdir src && \
 
 # 2. INJEÇÃO DOS ESTEROIDES (SIMD, AVX2, FMA e Strip)
 # É aqui que a mágica do processador acontece
-# ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
+ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
 
 # Agora sim copiamos o seu código real
 COPY api/src/ ./src/
 
-# Build arg: pass FEATURES=compat for Docker Desktop / Mac.
-# Default (empty) = native io_uring bind for the test machine.
-ARG FEATURES="compat"
-
 # Atualizamos a data do arquivo pra forçar o cargo a compilar o seu código (e não o falso)
-RUN touch src/main.rs && cargo build --release $(if [ -n "$FEATURES" ]; then echo "--features $FEATURES"; fi)
+RUN touch src/main.rs && cargo build --release
 
 # Removemos qualquer símbolo de debug restante para diminuir a RAM usada
 RUN strip target/release/api

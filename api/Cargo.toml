@@ -3,9 +3,6 @@ name = "api"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-compat = []  # Use std socket bind (for Docker Desktop / older kernels)
-
 [dependencies]
 monoio = { version = "0.2.4", features = ["sync", "macros", "utils", "legacy"] }
 httparse = "1"

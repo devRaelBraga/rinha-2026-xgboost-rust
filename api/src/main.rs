@@ -281,17 +281,12 @@ async fn main() -> std::io::Result<()> {
     let sock_path = format!("/tmp/sockets/api{}.sock", instance_id);
     let _ = std::fs::remove_file(&sock_path);
 
-    // Default: monoio native bind (io_uring IORING_OP_SOCKET — fastest).
-    // With --features compat: std bind + from_std (for Docker Desktop / older kernels).
-    #[cfg(not(feature = "compat"))]
-    let listener = monoio::net::UnixListener::bind(&sock_path)?;
-
-    #[cfg(feature = "compat")]
-    let listener = {
-        let std_listener = std::os::unix::net::UnixListener::bind(&sock_path)?;
-        std_listener.set_nonblocking(true)?;
-        monoio::net::UnixListener::from_std(std_listener)?
-    };
+    // Use std UnixListener::bind (standard syscalls) then convert to monoio.
+    // bind() runs once at startup — zero perf impact. io_uring benefits are
+    // in accept/read/write during request handling, which monoio still handles.
+    let std_listener = std::os::unix::net::UnixListener::bind(&sock_path)?;
+    std_listener.set_nonblocking(true)?;
+    let listener = monoio::net::UnixListener::from_std(std_listener)?;
 
     // Set permissions to 0777
     let mut perms = std::fs::metadata(&sock_path)?.permissions();

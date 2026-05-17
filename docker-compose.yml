@@ -46,7 +46,7 @@ services:
       - rinha
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
-      timeout: 1s
+      timeout: 5s
       retries: 5
     deploy:
       resources:
@@ -69,7 +69,7 @@ services:
       - rinha
     healthcheck:
       test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
-      timeout: 1s
+      timeout: 5s
       retries: 5
     deploy:
       resources:
