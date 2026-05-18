@@ -8,7 +8,7 @@
     "edge_case_count": 797,
     "edge_case_rate": 0.0147
   },
-  "p99": "1.33ms",
+  "p99": "1.24ms",
   "scoring": {
     "breakdown": {
       "false_positive_detections": 0,
@@ -21,7 +21,7 @@
     "weighted_errors_E": 0,
     "error_rate_epsilon": 0,
     "p99_score": {
-      "value": 2877.62,
+      "value": 2906.4,
       "cut_triggered": false
     },
     "detection_score": {
@@ -30,14 +30,14 @@
       "absolute_penalty": 0,
       "cut_triggered": false
     },
-    "final_score": 5877.62
+    "final_score": 5906.4
   },
   "latency_breakdown": {
-    "p99_wait_ms": 1.2,
+    "p99_wait_ms": 1.12,
     "p99_recv_ms": 0.12,
     "p99_send_ms": 0.09,
-    "p95_total_ms": 0.96,
-    "max_total_ms": 34.42,
-    "avg_total_ms": 0.59
+    "p95_total_ms": 0.92,
+    "max_total_ms": 11.04,
+    "avg_total_ms": 0.57
   }
 }

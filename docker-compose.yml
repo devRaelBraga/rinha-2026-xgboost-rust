@@ -19,10 +19,8 @@ services:
     volumes:
       - sockets:/sockets
     depends_on:
-      api1:
-        condition: service_healthy
-      api2:
-        condition: service_healthy
+      - api1
+      - api2
     networks:
       - rinha
     deploy:
@@ -45,10 +43,6 @@ services:
       - sockets:/tmp/sockets
     networks:
       - rinha
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:
@@ -69,10 +63,6 @@ services:
       - sockets:/tmp/sockets
     networks:
       - rinha
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:

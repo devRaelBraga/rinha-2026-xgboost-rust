@@ -1,16 +1,14 @@
 use serde::Deserialize;
+use std::borrow::Cow;
 
 #[derive(Debug, Deserialize)]
 pub struct FraudRequest<'a> {
-    pub id: &'a str,
     #[serde(borrow)]
+    pub id: Cow<'a, str>,
     pub transaction: Transaction<'a>,
-    #[serde(borrow)]
     pub customer: Customer<'a>,
-    #[serde(borrow)]
     pub merchant: Merchant<'a>,
     pub terminal: Terminal,
-    #[serde(borrow)]
     pub last_transaction: Option<LastTransaction<'a>>,
 }
 
@@ -18,7 +16,8 @@ pub struct FraudRequest<'a> {
 pub struct Transaction<'a> {
     pub amount: f64,
     pub installments: i32,
-    pub requested_at: &'a str,
+    #[serde(borrow)]
+    pub requested_at: Cow<'a, str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,13 +25,15 @@ pub struct Customer<'a> {
     pub avg_amount: f64,
     pub tx_count_24h: i32,
     #[serde(borrow)]
-    pub known_merchants: Vec<&'a str>,
+    pub known_merchants: Vec<Cow<'a, str>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Merchant<'a> {
-    pub id: &'a str,
-    pub mcc: &'a str,
+    #[serde(borrow)]
+    pub id: Cow<'a, str>,
+    #[serde(borrow)]
+    pub mcc: Cow<'a, str>,
     pub avg_amount: f64,
 }
 
@@ -45,7 +46,8 @@ pub struct Terminal {
 
 #[derive(Debug, Deserialize)]
 pub struct LastTransaction<'a> {
-    pub timestamp: &'a str,
+    #[serde(borrow)]
+    pub timestamp: Cow<'a, str>,
     pub km_from_current: f64,
 }
 

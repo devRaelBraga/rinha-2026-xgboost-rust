@@ -23,7 +23,7 @@ RUN mkdir src && \
 
 # 2. INJEÇÃO DOS ESTEROIDES (SIMD, AVX2, FMA e Strip)
 # É aqui que a mágica do processador acontece
-ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
+# ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
 
 # Agora sim copiamos o seu código real
 COPY api/src/ ./src/
@@ -42,8 +42,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxgboost0 \
     liburing2 \
-    ca-certificates \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiamos o binário otimizado do estágio anterior

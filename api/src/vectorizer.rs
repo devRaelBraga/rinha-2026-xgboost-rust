@@ -85,7 +85,8 @@ pub fn vectorize(
 ) -> [f32; 14] {
     let mut v = [0.0f32; 14];
 
-    let (hour, dow) = match parse_iso8601(&req.transaction.requested_at) {
+    let cur_time_parsed = parse_iso8601(&req.transaction.requested_at);
+    let (hour, dow) = match cur_time_parsed {
         Some((y, m, d, h, _min, _s)) => (h, day_of_week(y, m, d)),
         None => (12, 3), // fallback: noon on Wednesday
     };
@@ -102,7 +103,7 @@ pub fn vectorize(
 
     if let Some(ref lt) = req.last_transaction {
         if let (Some(cur), Some(last)) = (
-            parse_iso8601(&req.transaction.requested_at),
+            cur_time_parsed,
             parse_iso8601(&lt.timestamp),
         ) {
             let cur_ts = to_unix_secs(cur.0, cur.1, cur.2, cur.3, cur.4, cur.5);

@@ -6,8 +6,41 @@ const NLIST: usize = 4096;
 const NPROBE: usize = 16;
 const DIM: usize = 14;
 
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn l2_dist_avx2(a: &[i16; 16], b: &[i16; 16]) -> u32 {
+    let va = _mm256_loadu_si256(a.as_ptr() as *const __m256i);
+    let vb = _mm256_loadu_si256(b.as_ptr() as *const __m256i);
+    let diff = _mm256_sub_epi16(va, vb);
+    let sq = _mm256_madd_epi16(diff, diff);
+    
+    let hi = _mm256_extracti128_si256(sq, 1);
+    let lo = _mm256_castsi256_si128(sq);
+    let sum = _mm_add_epi32(hi, lo);
+    
+    let shuf = _mm_shuffle_epi32(sum, 0b01001110); // _MM_SHUFFLE(1, 0, 3, 2) is 0b01001110, or just use 78
+    let sums = _mm_add_epi32(sum, shuf);
+    let shuf2 = _mm_shuffle_epi32(sums, 0b10110001); // _MM_SHUFFLE(2, 3, 0, 1) is 0b10110001, or 177
+    let result = _mm_add_epi32(sums, shuf2);
+    _mm_cvtsi128_si32(result) as u32
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline(always)]
+fn l2_dist_scalar(a: &[i16; 16], b: &[i16; 16]) -> u32 {
+    let mut d: u32 = 0;
+    for j in 0..16 {
+        let diff = a[j] as i32 - b[j] as i32;
+        d += (diff * diff) as u32;
+    }
+    d
+}
+
 pub struct IvfIndex {
-    centroids: Vec<[f32; 16]>,
+    centroids: Vec<[i16; 16]>,
     offsets: Vec<u32>,
     vectors: Vec<[i16; 16]>,
     labels: Vec<u8>,
@@ -22,14 +55,14 @@ impl IvfIndex {
     ) -> std::io::Result<Self> {
         let mut f_centroids = File::open(centroids_path)?;
         let len_centroids = f_centroids.metadata()?.len() as usize;
-        let mut raw_centroids = vec![0.0f32; len_centroids / 4];
+        let mut raw_centroids = vec![0i16; len_centroids / 2];
         let slice_centroids = unsafe { std::slice::from_raw_parts_mut(raw_centroids.as_mut_ptr() as *mut u8, len_centroids) };
         f_centroids.read_exact(slice_centroids)?;
 
         let num_centroids = raw_centroids.len() / DIM;
         let mut centroids = Vec::with_capacity(num_centroids);
         for chunk in raw_centroids.chunks_exact(DIM) {
-            let mut arr = [0.0f32; 16];
+            let mut arr = [0i16; 16];
             arr[..DIM].copy_from_slice(chunk);
             centroids.push(arr);
         }
@@ -68,19 +101,27 @@ impl IvfIndex {
     }
 
     pub fn search(&self, query: &[f32; 14]) -> f64 {
-        let mut q_f32 = [0.0f32; 16];
-        q_f32[..DIM].copy_from_slice(query);
+        let mut q = [0i16; 16];
+        for i in 0..DIM {
+            let v = query[i];
+            q[i] = if v < 0.0 {
+                (v * 10000.0 - 0.5) as i16
+            } else {
+                (v * 10000.0 + 0.5) as i16
+            };
+        }
 
         let mut top_cells = [0usize; NPROBE];
-        let mut top_cell_dists = [f32::MAX; NPROBE];
+        let mut top_cell_dists = [u32::MAX; NPROBE];
 
         for i in 0..NLIST {
             let target_centroid = &self.centroids[i];
-            let mut d = 0.0f32;
-            for j in 0..16 {
-                let diff = q_f32[j] - target_centroid[j];
-                d += diff * diff;
-            }
+            
+            #[cfg(target_arch = "x86_64")]
+            let d = unsafe { l2_dist_avx2(&q, target_centroid) };
+            
+            #[cfg(not(target_arch = "x86_64"))]
+            let d = l2_dist_scalar(&q, target_centroid);
 
             if d < top_cell_dists[NPROBE - 1] {
                 let mut pos = NPROBE - 1;
@@ -92,16 +133,6 @@ impl IvfIndex {
                 top_cell_dists[pos] = d;
                 top_cells[pos] = i;
             }
-        }
-
-        let mut q = [0i16; 16];
-        for i in 0..DIM {
-            let v = query[i];
-            q[i] = if v < 0.0 {
-                (v * 10000.0 - 0.5) as i16
-            } else {
-                (v * 10000.0 + 0.5) as i16
-            };
         }
 
         let mut top_dist = [u32::MAX; 5];

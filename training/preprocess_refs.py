@@ -89,7 +89,11 @@ def main():
     }
 
     print(f"Saving centroids to {paths['centroids']}...")
-    centroids.astype(np.float32).tofile(paths['centroids'])
+    centroids_i16 = np.zeros((args.nlist, dim), dtype=np.int16)
+    for i in range(args.nlist):
+        for j in range(dim):
+            centroids_i16[i, j] = quantize(centroids[i, j])
+    centroids_i16.tofile(paths['centroids'])
 
     print(f"Saving offsets to {paths['offsets']}...")
     ivf_offsets.tofile(paths['offsets'])
