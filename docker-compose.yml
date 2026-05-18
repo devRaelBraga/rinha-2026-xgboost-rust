@@ -40,6 +40,7 @@ services:
     environment:
       - PORT=8080
       - INSTANCE_ID=1
+      - OMP_NUM_THREADS=1
     volumes:
       - sockets:/tmp/sockets
     networks:
@@ -63,6 +64,7 @@ services:
     environment:
       - PORT=8080
       - INSTANCE_ID=2
+      - OMP_NUM_THREADS=1
     volumes:
       - sockets:/tmp/sockets
     networks:

@@ -1,33 +1,38 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct FraudRequest {
-    pub id: String,
-    pub transaction: Transaction,
-    pub customer: Customer,
-    pub merchant: Merchant,
+pub struct FraudRequest<'a> {
+    pub id: &'a str,
+    #[serde(borrow)]
+    pub transaction: Transaction<'a>,
+    #[serde(borrow)]
+    pub customer: Customer<'a>,
+    #[serde(borrow)]
+    pub merchant: Merchant<'a>,
     pub terminal: Terminal,
-    pub last_transaction: Option<LastTransaction>,
+    #[serde(borrow)]
+    pub last_transaction: Option<LastTransaction<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Transaction {
+pub struct Transaction<'a> {
     pub amount: f64,
     pub installments: i32,
-    pub requested_at: String,
+    pub requested_at: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Customer {
+pub struct Customer<'a> {
     pub avg_amount: f64,
     pub tx_count_24h: i32,
-    pub known_merchants: Vec<String>,
+    #[serde(borrow)]
+    pub known_merchants: Vec<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Merchant {
-    pub id: String,
-    pub mcc: String,
+pub struct Merchant<'a> {
+    pub id: &'a str,
+    pub mcc: &'a str,
     pub avg_amount: f64,
 }
 
@@ -39,8 +44,8 @@ pub struct Terminal {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct LastTransaction {
-    pub timestamp: String,
+pub struct LastTransaction<'a> {
+    pub timestamp: &'a str,
     pub km_from_current: f64,
 }
 

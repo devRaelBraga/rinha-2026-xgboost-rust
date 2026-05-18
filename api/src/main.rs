@@ -211,7 +211,10 @@ async fn handle_connection(stream: UnixStream) {
 
         // ---- Process and respond -----------------------------------------
         let response = process_fraud_request(&mut body_buf);
-        let (res, _) = stream.write_all(response.to_vec()).await;
+        body_buf.clear();
+        body_buf.extend_from_slice(response);
+        let (res, returned_buf) = stream.write_all(body_buf).await;
+        body_buf = returned_buf;
         if res.is_err() { return; }
     }
 }

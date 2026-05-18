@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { SharedArray } from 'k6/data';
-import { Counter } from 'k6/metrics';
+import { Counter, Trend } from 'k6/metrics';
 import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 import exec from 'k6/execution';
 
@@ -19,8 +19,12 @@ const fpCount = new Counter('fp_count');
 const fnCount = new Counter('fn_count');
 const errorCount = new Counter('error_count');
 
+const waitingTime = new Trend('waiting_time');
+const receivingTime = new Trend('receiving_time');
+const sendingTime = new Trend('sending_time');
+
 export const options = {
-    summaryTrendStats: ['p(99)'],
+    summaryTrendStats: ['avg', 'p(90)', 'p(95)', 'p(99)', 'max'],
     systemTags: ['status', 'method'],
     dns: {
         ttl: '5m',
@@ -65,6 +69,10 @@ export default function () {
     if (res.timings.duration > 5) {
         console.log(`[SLOW REQ] Duration: ${res.timings.duration}ms (send: ${res.timings.sending}ms, wait: ${res.timings.waiting}ms, recv: ${res.timings.receiving}ms). TX_ID: ${entry.request.id}`);
     }
+
+    waitingTime.add(res.timings.waiting);
+    receivingTime.add(res.timings.receiving);
+    sendingTime.add(res.timings.sending);
 
     if (res.status === 200) {
         const body = JSON.parse(res.body);
@@ -166,6 +174,14 @@ export function handleSummary(data) {
             },
             final_score: +finalScore.toFixed(2),
         },
+        latency_breakdown: {
+            p99_wait_ms: data.metrics.waiting_time ? +(data.metrics.waiting_time.values['p(99)']).toFixed(2) : 0,
+            p99_recv_ms: data.metrics.receiving_time ? +(data.metrics.receiving_time.values['p(99)']).toFixed(2) : 0,
+            p99_send_ms: data.metrics.sending_time ? +(data.metrics.sending_time.values['p(99)']).toFixed(2) : 0,
+            p95_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['p(95)']).toFixed(2) : 0,
+            max_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['max']).toFixed(2) : 0,
+            avg_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['avg']).toFixed(2) : 0,
+        }
     };
 
     return {

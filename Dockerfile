@@ -60,5 +60,8 @@ COPY training/output/ivf_labels.bin /data/ivf_labels.bin
 
 EXPOSE 8080
 
+# Força o XGBoost a rodar estritamente em single-thread (remove overhead de 42% do OpenMP)
+ENV OMP_NUM_THREADS=1
+
 # Usamos o formato JSON array para o CMD (Melhor prática do Docker)
 CMD ["/server", "--model", "/data/model.json", "--port", "8080"]
