@@ -77,7 +77,7 @@ fn process_fraud_request(body: &mut [u8]) -> &'static [u8] {
     with_state(|state| {
         let vector = vectorize(&req, &state.norm_config, &state.mcc_risk);
 
-        let fraud_score = match state.predictor.predict(vector) {
+        let fraud_score = match state.predictor.predict(&vector) {
             Some(score) => score,
             None => return RESP_APPROVED,
         };
@@ -263,7 +263,7 @@ async fn main() -> std::io::Result<()> {
     // Also warms CPU cache lines for the IVF centroid/vector data.
     println!("Running warmup sequence...");
     let dummy_vector: [f32; 14] = [0.0f32; 14];
-    let _ = predictor.predict(dummy_vector);
+    let _ = predictor.predict(&dummy_vector);
     let _ = ivf_index.search(&dummy_vector);
     println!("Warmup complete, API is ready!");
 

@@ -3,7 +3,9 @@
 # ==========================================
 FROM rust:1-bookworm AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list
+
+RUN apt-get update && apt-get -t trixie install -y --no-install-recommends \
     libxgboost-dev clang liburing-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -23,7 +25,7 @@ RUN mkdir src && \
 
 # 2. INJEÇÃO DOS ESTEROIDES (SIMD, AVX2, FMA e Strip)
 # É aqui que a mágica do processador acontece
-# ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
+ENV RUSTFLAGS="-C target-cpu=haswell -C target-feature=+avx2,+fma -C link-arg=-s"
 
 # Agora sim copiamos o seu código real
 COPY api/src/ ./src/
@@ -37,7 +39,7 @@ RUN strip target/release/api
 # ==========================================
 # ESTÁGIO 2: RUNTIME (O Contêiner Leve)
 # ==========================================
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxgboost0 \
