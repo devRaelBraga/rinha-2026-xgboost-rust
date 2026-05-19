@@ -255,12 +255,22 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to load IVF index");
 
     // --- Warmup Sequence ---
-    // XGBoost lazily allocates inference buffers on first predict; prime them now.
-    // Also warms CPU cache lines for the IVF centroid/vector data.
-    println!("Running warmup sequence...");
-    let dummy_vector: [f32; 14] = [0.0f32; 14];
-    let _ = predictor.predict(&dummy_vector);
-    let _ = ivf_index.search(&dummy_vector);
+    // Warmup: prime XGBoost's internal inference buffers and walk enough of
+    // the IVF centroid + vector arrays to bring them into the page cache.
+    // Varied inputs ensure we hit many different IVF cells, not just cell 0.
+    println!("Running warmup sequence (200 requests)...");
+    const WARMUP_ITERS: usize = 200;
+    let mut lcg: u64 = 0xdeadbeef_cafebabe; // simple LCG — no alloc, deterministic
+    for _ in 0..WARMUP_ITERS {
+        let mut v = [0.0f32; 14];
+        for x in v.iter_mut() {
+            lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            // map to [0.0, 1.0]
+            *x = ((lcg >> 33) as f32) / (u32::MAX as f32);
+        }
+        let _ = predictor.predict(&v);
+        let _ = ivf_index.search(&v);
+    }
     println!("Warmup complete, API is ready!");
 
     // Store state in thread-local (no Arc needed — single threaded monoio)
