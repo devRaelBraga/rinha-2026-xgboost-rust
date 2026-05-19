@@ -10,6 +10,9 @@ const DIM: usize = 14;
 use std::arch::x86_64::*;
 
 #[cfg(target_arch = "x86_64")]
+const PREFETCH_DIST: usize = 8;
+
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn l2_dist_avx2(a: &[i16; 16], b: &[i16; 16]) -> u32 {
     let va = _mm256_loadu_si256(a.as_ptr() as *const __m256i);
@@ -115,6 +118,16 @@ impl IvfIndex {
         let mut top_cell_dists = [u32::MAX; NPROBE];
 
         for i in 0..NLIST {
+            #[cfg(target_arch = "x86_64")]
+            if i + PREFETCH_DIST < NLIST {
+                unsafe {
+                    _mm_prefetch(
+                        self.centroids[i + PREFETCH_DIST].as_ptr() as *const i8,
+                        _MM_HINT_T0,
+                    );
+                }
+            }
+
             let target_centroid = &self.centroids[i];
             
             #[cfg(target_arch = "x86_64")]
@@ -143,13 +156,23 @@ impl IvfIndex {
             let end = self.offsets[cell_id + 1] as usize;
 
             for i in start..end {
-                let target_vec = &self.vectors[i];
-                
-                let mut dist: u32 = 0;
-                for j in 0..16 {
-                    let diff = target_vec[j] as i32 - q[j] as i32;
-                    dist += (diff * diff) as u32;
+                #[cfg(target_arch = "x86_64")]
+                if i + PREFETCH_DIST < end {
+                    unsafe {
+                        _mm_prefetch(
+                            self.vectors[i + PREFETCH_DIST].as_ptr() as *const i8,
+                            _MM_HINT_T0,
+                        );
+                    }
                 }
+
+                let target_vec = &self.vectors[i];
+
+                #[cfg(target_arch = "x86_64")]
+                let dist = unsafe { l2_dist_avx2(target_vec, &q) };
+
+                #[cfg(not(target_arch = "x86_64"))]
+                let dist = l2_dist_scalar(target_vec, &q);
 
                 if dist < top_dist[4] {
                     let mut pos = 4;

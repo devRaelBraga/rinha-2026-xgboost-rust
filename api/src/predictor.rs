@@ -6,6 +6,16 @@ pub type bst_ulong = u64;
 
 #[link(name = "xgboost")]
 extern "C" {
+    fn XGDMatrixCreateFromMat(
+        data: *const f32,
+        nrow: bst_ulong,
+        ncol: bst_ulong,
+        missing: f32,
+        out: *mut DMatrixHandle,
+    ) -> c_int;
+
+    fn XGDMatrixFree(handle: DMatrixHandle) -> c_int;
+
     fn XGBoosterCreate(
         dmats: *const DMatrixHandle,
         len: bst_ulong,
@@ -22,13 +32,13 @@ extern "C" {
         value: *const c_char,
     ) -> c_int;
 
-    fn XGBoosterPredictFromDense(
+    fn XGBoosterPredict(
         handle: BoosterHandle,
-        values: *const c_char,
-        config: *const c_char,
-        m: DMatrixHandle,
-        out_shape: *mut *const bst_ulong,
-        out_dim: *mut bst_ulong,
+        dmat: DMatrixHandle,
+        option_mask: c_int,
+        ntree_limit: c_uint,
+        training: c_int,
+        out_len: *mut bst_ulong,
         out_result: *mut *const f32,
     ) -> c_int;
 }
@@ -63,69 +73,21 @@ impl Predictor {
     #[inline(always)]
     pub fn predict(&self, features: &[f32; 14]) -> Option<f64> {
         unsafe {
-            let ptr = features.as_ptr() as u64;
-            
-            const JSON_PREFIX: &[u8] = b"{\"data\": [";
-            const JSON_SUFFIX: &[u8] = b", false], \"shape\": [1, 14], \"typestr\": \"<f4\", \"version\": 3}\0";
-            
-            let mut buf = [0u8; 128];
-            let mut idx = 0;
-            
-            buf[idx..idx + JSON_PREFIX.len()].copy_from_slice(JSON_PREFIX);
-            idx += JSON_PREFIX.len();
-            
-            if ptr == 0 {
-                buf[idx] = b'0';
-                idx += 1;
-            } else {
-                const PAIRS: &[u8; 200] = b"00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899";
-                let mut temp = [0u8; 20];
-                let mut t_idx = 20;
-                let mut n = ptr;
-                
-                while n >= 100 {
-                    let r = (n % 100) as usize * 2;
-                    n /= 100;
-                    t_idx -= 2;
-                    temp[t_idx] = PAIRS[r];
-                    temp[t_idx + 1] = PAIRS[r + 1];
-                }
-                
-                if n < 10 {
-                    t_idx -= 1;
-                    temp[t_idx] = b'0' + n as u8;
-                } else {
-                    let r = n as usize * 2;
-                    t_idx -= 2;
-                    temp[t_idx] = PAIRS[r];
-                    temp[t_idx + 1] = PAIRS[r + 1];
-                }
-                
-                let len = 20 - t_idx;
-                buf[idx..idx + len].copy_from_slice(&temp[t_idx..20]);
-                idx += len;
-            }
-            
-            buf[idx..idx + JSON_SUFFIX.len()].copy_from_slice(JSON_SUFFIX);
-            
-            const CONFIG_JSON: &[u8] = b"{\"type\": 1, \"missing\": 0.0, \"iteration_begin\": 0, \"iteration_end\": 0, \"strict_shape\": false}\0";
+            let mut dmatrix: DMatrixHandle = std::ptr::null_mut();
 
-            let mut out_shape: *const bst_ulong = std::ptr::null();
-            let mut out_dim: bst_ulong = 0;
-            let mut out_result: *const f32 = std::ptr::null();
+            if XGDMatrixCreateFromMat(features.as_ptr(), 1, 14, 0.0, &mut dmatrix) == 0 {
+                let mut out_len: bst_ulong = 0;
+                let mut out_ptr: *const f32 = std::ptr::null();
 
-            if XGBoosterPredictFromDense(
-                self.handle, 
-                buf.as_ptr() as *const c_char, 
-                CONFIG_JSON.as_ptr() as *const c_char, 
-                std::ptr::null_mut(), 
-                &mut out_shape, 
-                &mut out_dim, 
-                &mut out_result
-            ) == 0 {
-                if !out_result.is_null() {
-                    return Some((*out_result as f64).clamp(0.0, 1.0));
+                if XGBoosterPredict(self.handle, dmatrix, 0, 0, 0, &mut out_len, &mut out_ptr) == 0
+                    && out_len > 0
+                    && !out_ptr.is_null()
+                {
+                    let score = (*out_ptr as f64).clamp(0.0, 1.0);
+                    XGDMatrixFree(dmatrix);
+                    return Some(score);
                 }
+                XGDMatrixFree(dmatrix);
             }
             None
         }

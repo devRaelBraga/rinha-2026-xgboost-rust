@@ -3,9 +3,7 @@
 # ==========================================
 FROM rust:1-bookworm AS builder
 
-RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list
-
-RUN apt-get update && apt-get -t trixie install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libxgboost-dev clang liburing-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,7 +37,7 @@ RUN strip target/release/api
 # ==========================================
 # ESTÁGIO 2: RUNTIME (O Contêiner Leve)
 # ==========================================
-FROM debian:trixie-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxgboost0 \
