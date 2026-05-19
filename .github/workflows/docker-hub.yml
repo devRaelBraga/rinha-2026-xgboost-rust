@@ -1,0 +1,51 @@
+name: Build and Push to Docker Hub
+
+on:
+  push:
+    branches:
+      - main 
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      # --- PASSO DO VERSIONAMENTO SEQUENCIAL ---
+      # Aqui calculamos a versão. Ajuste o BASE_MINOR para bater com o seu histórico.
+      - name: 🔢 Calcular Próxima Versão
+        id: calc_version
+        run: |
+          # O github.run_number começa em 1 na primeira execução deste workflow.
+          # Se esta for a primeira vez que essa action roda e você quer que a versão seja v3.3:
+          # Deixe o BASE_MINOR como 2 (pois 2 + 1 = 3).
+          # Se a sua action já rodou no passado, mude o BASE_MINOR para: (Versão desejada) - (Número do run_number atual).
+          BASE_MINOR=2
+          RUN_NUMBER=${{ github.run_number }}
+          MINOR=$((BASE_MINOR + RUN_NUMBER))
+          
+          VERSION="v3.$MINOR"
+          echo "IMAGE_VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "A imagem será taggeada como: $VERSION"
+
+      - name: 🛠️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 🚀 Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          # Boa prática de engenharia: subimos a versão específica E atualizamos a tag 'latest' simultaneamente
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026:${{ steps.calc_version.outputs.IMAGE_VERSION }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026:latest
