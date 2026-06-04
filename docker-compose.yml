@@ -3,6 +3,7 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
+      o: "size=4m,uid=0,gid=0,mode=0777"
 
 services:
 
@@ -14,17 +15,15 @@ services:
     volumes:
       - sockets:/sockets
     depends_on:
-      api1:
-        condition: service_healthy
-      api2:
-        condition: service_healthy
+      - api1
+      - api2
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
     security_opt:
-      - seccomp:unconfined
       - apparmor:unconfined
+    cpuset: "2,3"
     logging:
       driver: "none"
     deploy:
@@ -34,7 +33,7 @@ services:
           memory: "30MB"
 
   api1:
-    image: hisraelbraga/hisrael-rinha-rust-2026:v3.1
+    image: hisraelbraga/hisrael-rinha-rust-2026-knn:v3.7
     environment:
       - PORT=8080
       - INSTANCE_ID=1
@@ -45,22 +44,18 @@ services:
         soft: 65535
         hard: 65535
     security_opt:
-      - seccomp:unconfined
       - apparmor:unconfined
+    cpuset: "0"
     logging:
       driver: "none"
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api1.sock", "http://localhost/ready" ]
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:
-          cpus: "0.4"
+          cpus: "0.40"
           memory: "160MB"
 
   api2:
-    image: hisraelbraga/hisrael-rinha-rust-2026:v3.1
+    image: hisraelbraga/hisrael-rinha-rust-2026-knn:v3.7
     environment:
       - PORT=8080
       - INSTANCE_ID=2
@@ -71,16 +66,12 @@ services:
         soft: 65535
         hard: 65535
     security_opt:
-      - seccomp:unconfined
       - apparmor:unconfined
+    cpuset: "1"
     logging:
       driver: "none"
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "--unix-socket", "/tmp/sockets/api2.sock", "http://localhost/ready" ]
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:
-          cpus: "0.4"
+          cpus: "0.40"
           memory: "160MB"
