@@ -3,10 +3,10 @@ name: Build and Push to Docker Hub
 on:
   push:
     branches:
-      - main 
+      - knn-v2 
 
 jobs:
-  build-and-push:
+  build-and-push-knn-v2:
     runs-on: ubuntu-latest
 
     steps:
@@ -47,5 +47,5 @@ jobs:
           platforms: linux/amd64
           # Boa prática de engenharia: subimos a versão específica E atualizamos a tag 'latest' simultaneamente
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026:${{ steps.calc_version.outputs.IMAGE_VERSION }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026-knn:${{ steps.calc_version.outputs.IMAGE_VERSION }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/hisrael-rinha-rust-2026-knn:latest

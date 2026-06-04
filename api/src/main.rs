@@ -1,6 +1,5 @@
 mod knn;
 mod models;
-mod predictor;
 mod vectorizer;
 
 use mimalloc::MiMalloc;
@@ -16,7 +15,6 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use knn::IvfIndex;
 use models::{FraudRequest, Normalization};
-use predictor::Predictor;
 use vectorizer::vectorize;
 
 // ---------------------------------------------------------------------------
@@ -24,7 +22,6 @@ use vectorizer::vectorize;
 // Safe because monoio is single-threaded (threads = 1).
 // ---------------------------------------------------------------------------
 struct AppState {
-    predictor: Predictor,
     ivf_index: IvfIndex,
     norm_config: Normalization,
     mcc_risk: Box<[f32; 10000]>,
@@ -76,23 +73,11 @@ fn process_fraud_request(body: &mut [u8]) -> &'static [u8] {
 
     with_state(|state| {
         let vector = vectorize(&req, &state.norm_config, &state.mcc_risk);
-
-        let fraud_score = match state.predictor.predict(&vector) {
-            Some(score) => score,
-            None => return RESP_APPROVED,
-        };
-
-        if fraud_score <= 0.4 {
+        let fraud_score = state.ivf_index.search(&vector);
+        if fraud_score < 0.6 {
             RESP_APPROVED
-        } else if fraud_score > 0.65 {
-            RESP_REJECTED
         } else {
-            let knn_score = state.ivf_index.search(&vector);
-            if knn_score < 0.6 {
-                RESP_APPROVED
-            } else {
-                RESP_REJECTED
-            }
+            RESP_REJECTED
         }
     })
 }
@@ -220,9 +205,6 @@ async fn handle_connection(stream: UnixStream) {
 // ---------------------------------------------------------------------------
 #[monoio::main(threads = 1)]
 async fn main() -> std::io::Result<()> {
-    let model_path = std::env::args()
-        .nth(2)
-        .unwrap_or_else(|| "/data/model.json".to_string());
 
     let norm_path = "/data/normalization.json";
     let mcc_path = "/data/mcc_risk.json";
@@ -247,16 +229,13 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    println!("Loading XGBoost model...");
-    let predictor = Predictor::new(&model_path).expect("Failed to load XGBoost model");
 
     println!("Loading IVF index...");
     let ivf_index = IvfIndex::load(centroids_path, offsets_path, vectors_path, labels_path)
         .expect("Failed to load IVF index");
 
     // --- Warmup Sequence ---
-    // Warmup: prime XGBoost's internal inference buffers and walk enough of
-    // the IVF centroid + vector arrays to bring them into the page cache.
+    // Walk enough of the IVF centroid + vector arrays to bring them into the page cache.
     // Varied inputs ensure we hit many different IVF cells, not just cell 0.
     println!("Running warmup sequence (200 requests)...");
     const WARMUP_ITERS: usize = 200;
@@ -268,7 +247,6 @@ async fn main() -> std::io::Result<()> {
             // map to [0.0, 1.0]
             *x = ((lcg >> 33) as f32) / (u32::MAX as f32);
         }
-        let _ = predictor.predict(&v);
         let _ = ivf_index.search(&v);
     }
     println!("Warmup complete, API is ready!");
@@ -276,7 +254,6 @@ async fn main() -> std::io::Result<()> {
     // Store state in thread-local (no Arc needed — single threaded monoio)
     STATE.with(|cell| unsafe {
         *cell.get() = Some(AppState {
-            predictor,
             ivf_index,
             norm_config,
             mcc_risk,

@@ -23,6 +23,7 @@ services:
       - api2
     networks:
       - rinha
+    cpuset: "2,3"
     deploy:
       resources:
         limits:
@@ -33,16 +34,14 @@ services:
     #image: hisraelbraga/hisrael-rinha-rust-2026:initial
     build:
       context: .
-      args:
-        FEATURES: ${FEATURES:-}
     environment:
       - PORT=8080
       - INSTANCE_ID=1
-      - OMP_NUM_THREADS=1
     volumes:
       - sockets:/tmp/sockets
     networks:
       - rinha
+    cpuset: "0"
     deploy:
       resources:
         limits:
@@ -53,16 +52,14 @@ services:
     #image: hisraelbraga/hisrael-rinha-rust-2026:initial
     build:
       context: .
-      args:
-        FEATURES: ${FEATURES:-}
     environment:
       - PORT=8080
       - INSTANCE_ID=2
-      - OMP_NUM_THREADS=1
     volumes:
       - sockets:/tmp/sockets
     networks:
       - rinha
+    cpuset: "1"
     deploy:
       resources:
         limits:

@@ -4,7 +4,7 @@
 FROM rust:1-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libxgboost-dev clang liburing-dev \
+    clang liburing-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/api
@@ -40,15 +40,13 @@ RUN strip target/release/api
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libxgboost0 \
     liburing2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiamos o binário otimizado do estágio anterior
 COPY --from=builder /app/api/target/release/api /server
 
-# Copiamos seus modelos e matrizes (mantive igual ao seu)
-COPY training/output/model.json /data/model.json
+# Copiamos os dados do IVF index
 COPY resources/mcc_risk.json /data/mcc_risk.json
 COPY resources/normalization.json /data/normalization.json
 COPY training/output/centroids.bin /data/centroids.bin
@@ -58,8 +56,5 @@ COPY training/output/ivf_labels.bin /data/ivf_labels.bin
 
 EXPOSE 8080
 
-# Força o XGBoost a rodar estritamente em single-thread (remove overhead de 42% do OpenMP)
-ENV OMP_NUM_THREADS=1
-
 # Usamos o formato JSON array para o CMD (Melhor prática do Docker)
-CMD ["/server", "--model", "/data/model.json", "--port", "8080"]
+CMD ["/server"]

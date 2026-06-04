@@ -1,43 +1,50 @@
 {
   "expected": {
     "total": 54100,
-    "fraud_count": 24058,
-    "legit_count": 30042,
-    "fraud_rate": 0.4447,
-    "legit_rate": 0.5553,
-    "edge_case_count": 797,
-    "edge_case_rate": 0.0147
+    "fraud_count": 23959,
+    "legit_count": 30141,
+    "fraud_rate": 0.4429,
+    "legit_rate": 0.5571,
+    "edge_case_count": 645,
+    "edge_case_rate": 0.0119
   },
-  "p99": "1.31ms",
+  "p99": "1.36ms",
   "scoring": {
     "breakdown": {
-      "false_positive_detections": 0,
-      "false_negative_detections": 0,
-      "true_positive_detections": 24037,
-      "true_negative_detections": 30022,
+      "false_positive_detections": 13,
+      "false_negative_detections": 4,
+      "true_positive_detections": 23938,
+      "true_negative_detections": 30103,
       "http_errors": 0
     },
-    "failure_rate": "0%",
-    "weighted_errors_E": 0,
-    "error_rate_epsilon": 0,
+    "failure_rate": "0.03%",
+    "weighted_errors_E": 25,
+    "error_rate_epsilon": 0.000462,
     "p99_score": {
-      "value": 2881.24,
+      "value": 2865.74,
       "cut_triggered": false
     },
     "detection_score": {
-      "value": 3000,
+      "value": 2575.51,
       "rate_component": 3000,
-      "absolute_penalty": 0,
+      "absolute_penalty": -424.49,
       "cut_triggered": false
     },
-    "final_score": 5881.24
+    "final_score": 5441.25,
+    "raw": {
+      "p99_ms": 1.3622505599999999,
+      "failure_rate": 0.00031447704317584817,
+      "error_rate_epsilon": 0.0004624662399644826,
+      "p99_score": 2865.7430048921156,
+      "detection_score": 2575.5079956087548,
+      "rate_component": 3000,
+      "absolute_penalty": -424.4920043912454,
+      "final_score": 5441.25100050087
+    }
   },
-  "latency_breakdown": {
-    "p99_wait_ms": 1.18,
-    "p99_recv_ms": 0.13,
-    "p99_send_ms": 0.09,
-    "p95_total_ms": 0.96,
-    "max_total_ms": 14.17,
-    "avg_total_ms": 0.58
+  "edge_case_candidates": {
+    "fp_candidates": 989,
+    "fn_candidates": 1029,
+    "note": "These are all edge-case entries (score 0.2/0.4/0.6/0.8) that could be misclassified. Cross-reference with console.warn [FP]/[FN] logs for actual errors."
   }
 }

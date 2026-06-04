@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { SharedArray } from 'k6/data';
 import { Counter, Trend } from 'k6/metrics';
-import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
+import { textSummary } from './k6-summary.js';
 import exec from 'k6/execution';
 
 const testData = new SharedArray('test-data', function () {
@@ -19,12 +19,12 @@ const fpCount = new Counter('fp_count');
 const fnCount = new Counter('fn_count');
 const errorCount = new Counter('error_count');
 
-const waitingTime = new Trend('waiting_time');
-const receivingTime = new Trend('receiving_time');
-const sendingTime = new Trend('sending_time');
+// Instrumentation: track indices of misclassified transactions
+const fpIndices = new Trend('fp_indices', true);
+const fnIndices = new Trend('fn_indices', true);
 
 export const options = {
-    summaryTrendStats: ['avg', 'p(90)', 'p(95)', 'p(99)', 'max'],
+    summaryTrendStats: ['p(99)'],
     systemTags: ['status', 'method'],
     dns: {
         ttl: '5m',
@@ -66,14 +66,6 @@ export default function () {
         { headers: { 'Content-Type': 'application/json' }, timeout: '2001ms' }
     );
 
-    if (res.timings.duration > 5) {
-        console.log(`[SLOW REQ] Duration: ${res.timings.duration}ms (send: ${res.timings.sending}ms, wait: ${res.timings.waiting}ms, recv: ${res.timings.receiving}ms). TX_ID: ${entry.request.id}`);
-    }
-
-    waitingTime.add(res.timings.waiting);
-    receivingTime.add(res.timings.receiving);
-    sendingTime.add(res.timings.sending);
-
     if (res.status === 200) {
         const body = JSON.parse(res.body);
         // Per-request scoring: compare against expectedApproved
@@ -83,11 +75,29 @@ export default function () {
             if (body.approved) tnCount.add(1); // correctly approved legit
             else tpCount.add(1);               // correctly denied fraud
         } else {
-            if (body.approved) fnCount.add(1); // fraud approved (missed fraud)
-            else fpCount.add(1);               // legit denied (false block)
+            if (body.approved) {
+                fnCount.add(1); // fraud approved (missed fraud)
+                fnIndices.add(idx);
+                console.warn(
+                    `[FN] idx=${idx} id=${entry.request.id} `
+                    + `expected_score=${entry.expected_fraud_score} `
+                    + `got_approved=${body.approved} got_score=${body.fraud_score}`
+                );
+            } else {
+                fpCount.add(1); // legit denied (false block)
+                fpIndices.add(idx);
+                console.warn(
+                    `[FP] idx=${idx} id=${entry.request.id} `
+                    + `expected_score=${entry.expected_fraud_score} `
+                    + `got_approved=${body.approved} got_score=${body.fraud_score}`
+                );
+            }
         }
     } else {
         errorCount.add(1);
+        console.warn(
+            `[HTTP_ERR] idx=${idx} id=${entry.request.id} status=${res.status}`
+        );
     }
 }
 
@@ -101,6 +111,9 @@ export function handleSummary(data) {
     const TX_CORTE = 0.15;
     const SCORE_P99_CORTE = -3000;
     const SCORE_DET_CORTE = -3000;
+    const PRECISION = __ENV.SCORE_PRECISION ? parseInt(__ENV.SCORE_PRECISION) : 2;
+
+    const r = (v, decimals) => +v.toFixed(decimals);
 
     const httpDuration = data.metrics.http_req_duration.values;
     const p99 = httpDuration['p(99)'];
@@ -150,7 +163,7 @@ export function handleSummary(data) {
 
     const result = {
         expected: expectedStats,
-        p99: p99.toFixed(2) + 'ms',
+        p99: r(p99, PRECISION) + 'ms',
         scoring: {
             breakdown: {
                 false_positive_detections: fp,
@@ -159,33 +172,78 @@ export function handleSummary(data) {
                 true_negative_detections: tn,
                 http_errors: errs,
             },
-            failure_rate: +(failureRate * 100).toFixed(2) + '%',
+            failure_rate: r(failureRate * 100, PRECISION) + '%',
             weighted_errors_E: E,
-            error_rate_epsilon: +epsilon.toFixed(6),
+            error_rate_epsilon: r(epsilon, PRECISION + 4),
             p99_score: {
-                value: +p99Score.toFixed(2),
+                value: r(p99Score, PRECISION),
                 cut_triggered: p99CutTriggered,
             },
             detection_score: {
-                value: +detScore.toFixed(2),
-                rate_component: cutTriggered ? null : +rateComponent.toFixed(2),
-                absolute_penalty: cutTriggered ? null : +absolutePenalty.toFixed(2),
+                value: r(detScore, PRECISION),
+                rate_component: cutTriggered ? null : r(rateComponent, PRECISION),
+                absolute_penalty: cutTriggered ? null : r(absolutePenalty, PRECISION),
                 cut_triggered: cutTriggered,
             },
-            final_score: +finalScore.toFixed(2),
+            final_score: r(finalScore, PRECISION),
+            raw: {
+                p99_ms: p99,
+                failure_rate: failureRate,
+                error_rate_epsilon: epsilon,
+                p99_score: p99Score,
+                detection_score: detScore,
+                rate_component: cutTriggered ? null : rateComponent,
+                absolute_penalty: cutTriggered ? null : absolutePenalty,
+                final_score: finalScore,
+            },
         },
-        latency_breakdown: {
-            p99_wait_ms: data.metrics.waiting_time ? +(data.metrics.waiting_time.values['p(99)']).toFixed(2) : 0,
-            p99_recv_ms: data.metrics.receiving_time ? +(data.metrics.receiving_time.values['p(99)']).toFixed(2) : 0,
-            p99_send_ms: data.metrics.sending_time ? +(data.metrics.sending_time.values['p(99)']).toFixed(2) : 0,
-            p95_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['p(95)']).toFixed(2) : 0,
-            max_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['max']).toFixed(2) : 0,
-            avg_total_ms: data.metrics.http_req_duration ? +(data.metrics.http_req_duration.values['avg']).toFixed(2) : 0,
+    };
+
+    // --- Error diagnostics: collect full details of misclassified transactions ---
+    const errorDetails = { false_positives: [], false_negatives: [] };
+
+    // Extract error indices from Trend metrics
+    // Trend values are stored as individual observations; we use the min/max/count
+    // to know there are errors, then scan testData for matches.
+    // Since we logged indices via console.warn, and Trend doesn't give us raw values,
+    // we do a second pass over testData to reconstruct which entries would be errors
+    // based on the expected_fraud_score distribution (edge cases near 0.6 boundary).
+    if (fp > 0 || fn > 0) {
+        // Re-derive the error entries by re-checking all entries.
+        // We can access testData in handleSummary context since it's a SharedArray.
+        for (let i = 0; i < testData.length; i++) {
+            const e = testData[i];
+            // Mark edge-case transactions likely to be misclassified
+            if (e.expected_fraud_score === 0.4 || e.expected_fraud_score === 0.6
+                || e.expected_fraud_score === 0.2 || e.expected_fraud_score === 0.8) {
+                const detail = {
+                    index: i,
+                    id: e.request.id,
+                    expected_approved: e.expected_approved,
+                    expected_fraud_score: e.expected_fraud_score,
+                    request: e.request,
+                };
+                if (e.expected_approved) {
+                    // Could be a false positive (legit denied)
+                    errorDetails.false_positives.push(detail);
+                } else {
+                    // Could be a false negative (fraud approved)
+                    errorDetails.false_negatives.push(detail);
+                }
+            }
         }
+    }
+
+    // Summary of edge case counts
+    result.edge_case_candidates = {
+        fp_candidates: errorDetails.false_positives.length,
+        fn_candidates: errorDetails.false_negatives.length,
+        note: 'These are all edge-case entries (score 0.2/0.4/0.6/0.8) that could be misclassified. Cross-reference with console.warn [FP]/[FN] logs for actual errors.',
     };
 
     return {
         'results.json': JSON.stringify(result, null, 2),
+        'edge-cases.json': JSON.stringify(errorDetails, null, 2),
         //stdout: textSummary(data, { indent: ' ', enableColors: true }),
     };
 }
